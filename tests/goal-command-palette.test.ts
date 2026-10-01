@@ -11,7 +11,23 @@ import assert from "node:assert/strict";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import goalExtension from "../extensions/goal.ts";
+import { BOOLEAN_SETTING_KEYS, SETTING_ROWS } from "../extensions/goal-commands.ts";
 import { parseGoalFile } from "../extensions/storage/goal-files.ts";
+
+// The settings menu renders and dispatches from SETTING_ROWS alone, so a boolean setting that the
+// formatter handles but the table omits is invisible AND untoggleable while the file layer keeps
+// working — the failure mode is silence, not an error. `auditorPersistSession` was added to the
+// formatter and missed here (review, 2026-10-02); `auditorProjectResources` had been missing since it
+// was introduced. This test is the invariant that catches the whole class.
+test("every boolean setting the formatter handles has a settings-menu row", () => {
+	const rows = new Set(SETTING_ROWS.map((row) => String(row.key)));
+	const missing = [...BOOLEAN_SETTING_KEYS].filter((key) => !rows.has(key));
+	assert.deepEqual(
+		missing,
+		[],
+		`boolean setting(s) with no SETTING_ROWS entry: ${missing.join(", ")} — they cannot be displayed or toggled`,
+	);
+});
 
 const CURATED_COMMANDS = [
 	"goal", "sisyphus", "goal-direct", "sisyphus-direct", "goal-tweak", "goal-pause", "goal-resume",
