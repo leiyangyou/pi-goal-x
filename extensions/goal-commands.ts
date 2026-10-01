@@ -120,6 +120,7 @@ export const SETTING_ROWS: readonly SettingRow[] = [
 	{ key: "disableContracts", label: "disableContracts", section: "Goal behavior", kind: "boolean" },
 	{ key: "strictExecutionContract", label: "explicit execution contracts (opt-in)", section: "Goal behavior", kind: "boolean" },
 	{ key: "maxAutonomousRuns", label: "autonomous run allowance", section: "Goal behavior", kind: "positiveInteger" },
+	{ key: "showAutonomousRuns", label: "show autonomous runs line", section: "Goal behavior", kind: "boolean" },
 	{ key: "stallTimeoutMinutes", label: "stall timeout (minutes)", section: "Goal behavior", kind: "positiveInteger" },
 	{ key: "objectiveMaxChars", label: "max objective length (0 = none)", section: "Goal behavior", kind: "positiveInteger" },
 	{ key: "disableTasks", label: "disableTasks", section: "Task tracking", kind: "boolean" },
@@ -411,47 +412,10 @@ export function registerGoalCommands(core: GoalCore): void {
 		}
 	}
 
-	/**
-	 * One declarative row table for the settings menu (follow-up Stage 1).
-	 * Rendering and dispatch both derive from SETTING_ROWS so the displayed
-	 * fields and the selectable fields can never drift apart. Rows are grouped
-	 * into sections (Goal behavior / Task tracking / Completion auditor). All
-	 * eight persisted fields are present and operable.
-	 */
-	type SettingRow = {
-		key: keyof GoalSettings | string;
-		label: string;
-		section: "Goal behavior" | "Task tracking" | "Completion auditor" | "Blocker Oracle";
-		kind: "boolean" | "modelSelector" | "thinking" | "positiveInteger";
-		/** Settings path for the mutation (defaults to [key]). */
-		path?: string[];
-	};
-
-	const SETTING_ROWS: readonly SettingRow[] = [
-		{ key: "autoSelectSingleGoal", label: "autoSelectSingleGoal", section: "Goal behavior", kind: "boolean" },
-		{ key: "hideUnfocusedBanner", label: "hideUnfocusedBanner", section: "Goal behavior", kind: "boolean" },
-		{ key: "hideUnfocusedPrompt", label: "hideUnfocusedPrompt", section: "Goal behavior", kind: "boolean" },
-		{ key: "disableContracts", label: "disableContracts", section: "Goal behavior", kind: "boolean" },
-		{ key: "strictExecutionContract", label: "explicit execution contracts (opt-in)", section: "Goal behavior", kind: "boolean" },
-		{ key: "maxAutonomousRuns", label: "autonomous run allowance", section: "Goal behavior", kind: "positiveInteger" },
-		{ key: "showAutonomousRuns", label: "show autonomous runs line", section: "Goal behavior", kind: "boolean" },
-		{ key: "stallTimeoutMinutes", label: "stall timeout (minutes)", section: "Goal behavior", kind: "positiveInteger" },
-		{ key: "objectiveMaxChars", label: "max objective length (0 = none)", section: "Goal behavior", kind: "positiveInteger" },
-		{ key: "disableTasks", label: "disableTasks", section: "Task tracking", kind: "boolean" },
-		{ key: "subtaskDepth", label: "subtaskDepth", section: "Task tracking", kind: "positiveInteger" },
-		{ key: "disabled", label: "auditor disabled", section: "Completion auditor", kind: "boolean" },
-		{ key: "provider", label: "provider", section: "Completion auditor", kind: "modelSelector" },
-		{ key: "model", label: "model", section: "Completion auditor", kind: "modelSelector" },
-		{ key: "thinkingLevel", label: "thinking_level", section: "Completion auditor", kind: "thinking" },
-		// Issue #26: opt-in blocker Oracle. Disabled by default; provider/model
-		// must BOTH be set explicitly — the executor model is never used silently.
-		{ key: "oracleEnabled", label: "oracle enabled", section: "Blocker Oracle", kind: "boolean", path: ["oracle", "enabled"] },
-		{ key: "oracleProviderModel", label: "oracle provider/model", section: "Blocker Oracle", kind: "modelSelector", path: ["oracle"] },
-		{ key: "oracleThinkingLevel", label: "oracle thinking_level", section: "Blocker Oracle", kind: "thinking", path: ["oracle", "thinkingLevel"] },
-		{ key: "oracleProjectResources", label: "oracle project resources", section: "Blocker Oracle", kind: "boolean", path: ["oracle", "projectResources"] },
-		{ key: "oracleMaxFailedAttemptsPerBlocker", label: "max failed attempts per blocker", section: "Blocker Oracle", kind: "positiveInteger", path: ["oracle", "maxFailedAttemptsPerBlocker"] },
-	];
-
+	// The row table lives at module scope (`SETTING_ROWS`) so it can be tested; this function must NOT
+	// declare its own copy. A local shadow would leave rendering and dispatch on the old table while
+	// tests and probes read the exported one — the setting applies from the file and is invisible in the
+	// menu, which is exactly the defect the review caught.
 	function settingsValue(config: GoalSettings, key: keyof GoalSettings | string): string {
 		// A membership test does not narrow `key` the way the old `key === "…" || …` chain did, so the
 		// lookup is spelled out: these keys are booleans in GoalSettings, and an unset one reads false.
