@@ -11,7 +11,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, appendFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -19,6 +19,17 @@ import goalExtension from "../../extensions/goal.ts";
 import { createGoal, goalFocusDetails } from "../../extensions/goal-record.ts";
 import { activePathForGoal, parseGoalFile, serializeGoalFile, writeActiveGoalFile } from "../../extensions/storage/goal-files.ts";
 import { goalLedgerPath } from "../../extensions/goal-ledger.ts";
+
+// The global settings layer resolves under `${PI_CODING_AGENT_DIR:-~/.pi/agent}/pi-goal-x-settings.json`,
+// so without this pin every settings-rendering assertion in this file silently depends on the operator's
+// own machine: a global `auditorPersistSession: true` once flipped a row from `false (default)` to
+// `true (inherited from global)` and broke a menu test that has nothing to do with the setting (the
+// toggle test then could not find its "Set project override to true" action, because the inherited value
+// was already true). Pin it to an empty temp agent dir: project-file behaviour stays under test, the
+// operator's layers stop leaking in. Deeper fix if this recurs elsewhere: have createHarness pin it.
+const AGENT_DIR_PIN = mkdtempSync(path.join(tmpdir(), "pi-goal-integration-agent-"));
+process.env.PI_CODING_AGENT_DIR = AGENT_DIR_PIN;
+after(() => rmSync(AGENT_DIR_PIN, { recursive: true, force: true }));
 
 interface Harness {
 	handlers: Map<string, Function>;
@@ -448,7 +459,7 @@ describe("five-tool handler integration", () => {
 				await start(h);
 				await h.commands.get("goal-settings").handler("", h.ctx);
 				const lines = firstOptions.filter((o) => o.startsWith("  ") && !o.startsWith("  ───"));
-				assert.equal(lines.length, 19, `all nineteen rows rendered, got: ${lines.join(" | ")}`);
+				assert.equal(lines.length, 21, `all twenty-one rows rendered, got: ${lines.join(" | ")}`);
 				assert.ok(lines.some((l) => l === "  auditor disabled: true (project override)"));
 				assert.ok(lines.some((l) => l === "  provider: anthropic (project override)"));
 				assert.ok(lines.some((l) => l === "  model: (default) (default)"));
@@ -462,6 +473,14 @@ describe("five-tool handler integration", () => {
 				assert.ok(lines.some((l) => l === "  hideUnfocusedPrompt: false (default)"));
 				assert.ok(lines.some((l) => l === "  stall timeout (minutes): 0 (default)"));
 				assert.ok(lines.some((l) => l === "  max objective length (0 = none): 0 (default)"), "objective length row defaults to 0");
+				assert.ok(
+					lines.some((l) => l === "  auditor session on disk: false (default)"),
+					`auditor persist row rendered, got: ${lines.join(" | ")}`,
+				);
+				assert.ok(
+					lines.some((l) => l === "  auditor project resources: false (default)"),
+					`auditor project-resources row rendered, got: ${lines.join(" | ")}`,
+				);
 			} finally {
 				f.cleanup();
 			}
@@ -475,6 +494,9 @@ describe("five-tool handler integration", () => {
 					"  disableContracts: false (default)", "Set project override to true",
 					"  auditor disabled: false (default)", "Set project override to true",
 					"  autoSelectSingleGoal: false (default)", "Set project override to true",
+					// Dispatch, not just rendering: this row exists only if the runtime table has it, and the
+					// value only reaches the file if the row's key survives the whole menu path.
+					"  auditor session on disk: false (default)", "Set project override to true",
 					"Done",
 				];
 				const h = createHarness({
@@ -488,6 +510,7 @@ describe("five-tool handler integration", () => {
 				assert.equal(saved.disableContracts, true);
 				assert.equal(saved.disabled, true);
 				assert.equal(saved.autoSelectSingleGoal, true);
+				assert.equal(saved.auditorPersistSession, true, "the new row toggles through the real menu handler");
 				// Second pass removes the local overrides via the action menu's
 				// inherit choice; the file then omits both keys.
 				const selects2 = ["  disableTasks: true (project override)", "Use inherited value", "  autoSelectSingleGoal: true (project override)", "Use inherited value", "Done"];
