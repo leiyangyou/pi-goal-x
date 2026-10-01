@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
 	buildGoalAuditorPrompt,
+	createAuditorSessionManager,
 	parseAuditorDecision,
 	resolveAuditorModel,
 	resolveAuditorSessionModelOptions,
@@ -68,6 +69,91 @@ test("resolveAuditorSessionModelOptions shares parent ModelRuntime when availabl
 	const legacy = resolveAuditorSessionModelOptions({ modelRegistry: legacyRegistry } as any);
 	assert.equal(legacy.modelRuntime, undefined);
 	assert.equal(legacy.modelRegistry, legacyRegistry);
+});
+
+test("the auditor session is in memory by default and on disk when the operator opts in", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-goal-auditor-store-"));
+	try {
+		const sessionDir = path.join(dir, "sessions");
+		const memory = createAuditorSessionManager({ cwd: dir, sessionDir, persist: false });
+		const persisted = createAuditorSessionManager({ cwd: dir, sessionDir, persist: true });
+
+		assert.equal(memory.getSessionFile(), undefined, "default stays in memory (isolation unchanged, no extra files)");
+		assert.equal(
+			path.dirname(String(persisted.getSessionFile())),
+			sessionDir,
+			"the transcript lands beside the session that ran the audit, where a human looks for it",
+		);
+		assert.equal(persisted.getSessionDir(), sessionDir);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// The plumb, not just the helper: a 27-minute audit is unreachable for diagnostics if the
+// setting never reaches the session the auditor is actually created with.
+test("runGoalCompletionAuditor persists the auditor session when the setting is on", async () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-goal-auditor-test-"));
+	try {
+		let captured: any;
+		const mockSession = {
+			abort: () => {},
+			subscribe: () => () => {},
+			prompt: async () => {},
+		};
+
+		await runGoalCompletionAuditor({
+			ctx: {
+				cwd,
+				model: undefined,
+				modelRegistry: { find: () => undefined, getAvailable: () => [] },
+				sessionManager: { getSessionDir: () => "/tmp/fake-executor-session" },
+			} as never,
+			goal: goal(),
+			detailedSummary: "test",
+			settings: { auditorPersistSession: true } as never,
+			createSession: async (opts: any) => {
+				captured = opts;
+				return { session: mockSession } as never;
+			},
+		});
+
+		assert.ok(captured?.sessionManager?.getSessionFile(), "the audit session is file-backed");
+		assert.equal(captured?.sessionManager?.getSessionDir(), "/tmp/fake-executor-session");
+	} finally {
+		fs.rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("runGoalCompletionAuditor keeps the auditor session in memory when the setting is absent", async () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-goal-auditor-test-"));
+	try {
+		let captured: any;
+		const mockSession = {
+			abort: () => {},
+			subscribe: () => () => {},
+			prompt: async () => {},
+		};
+
+		await runGoalCompletionAuditor({
+			ctx: {
+				cwd,
+				model: undefined,
+				modelRegistry: { find: () => undefined, getAvailable: () => [] },
+				sessionManager: { getSessionDir: () => "/tmp/fake-executor-session" },
+			} as never,
+			goal: goal(),
+			detailedSummary: "test",
+			createSession: async (opts: any) => {
+				captured = opts;
+				return { session: mockSession } as never;
+			},
+		});
+
+		assert.equal(captured?.sessionManager?.getSessionFile(), undefined, "no setting means no extra files on disk");
+	} finally {
+		fs.rmSync(cwd, { recursive: true, force: true });
+	}
 });
 
 test("runGoalCompletionAuditor passes parent modelRuntime into createSession", async () => {

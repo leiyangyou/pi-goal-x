@@ -100,6 +100,8 @@ export interface GoalSettingsResolvedShape {
 	autoSelectSingleGoal?: boolean;
 	/** E3: load the project's own skills/extensions into auditor sessions (off by default = isolation). */
 	auditorProjectResources?: boolean;
+	/** Keep the completion auditor's session on disk so a long audit's transcript can be read after it ran. */
+	auditorPersistSession?: boolean;
 	/** F5: stall detector timeout in minutes (0 = off). */
 	stallTimeoutMinutes?: number;
 	/** Optional extension-run limit per creation/resume; zero disables, absent inherits (default unlimited). */
@@ -339,6 +341,7 @@ const ALLOWED_SETTINGS_KEYS = new Set([
 	"disabled",
 	"autoSelectSingleGoal",
 	"auditorProjectResources",
+	"auditorPersistSession",
 	"stallTimeoutMinutes",
 	"maxAutonomousRuns",
 	"strictExecutionContract",
@@ -400,6 +403,7 @@ export function parseSettingsLayer(
 			case "disabled":
 			case "autoSelectSingleGoal":
 			case "auditorProjectResources":
+			case "auditorPersistSession":
 			case "hideUnfocusedBanner":
 			case "showAutonomousRuns":
 			case "hideUnfocusedPrompt": {
@@ -772,6 +776,11 @@ function resolvedSettingsSnapshot(cwd: string, env: NodeJS.ProcessEnv): Settings
 		globalValue: global.layer.auditorProjectResources,
 		defaultValue: false,
 	}));
+	const auditorPersistSession = track("auditorPersistSession", resolveLeaf<boolean>({
+		projectValue: project.layer.auditorPersistSession,
+		globalValue: global.layer.auditorPersistSession,
+		defaultValue: false,
+	}));
 	const hideUnfocusedBanner = track("hideUnfocusedBanner", resolveLeaf<boolean>({
 		projectValue: project.layer.hideUnfocusedBanner,
 		globalValue: global.layer.hideUnfocusedBanner,
@@ -889,6 +898,7 @@ function resolvedSettingsSnapshot(cwd: string, env: NodeJS.ProcessEnv): Settings
 		disabled,
 		autoSelectSingleGoal,
 		auditorProjectResources,
+		auditorPersistSession,
 		hideUnfocusedBanner,
 		showAutonomousRuns,
 		hideUnfocusedPrompt,
@@ -1226,6 +1236,7 @@ function buildPersistedLayer(settings: GoalSettings): Record<string, unknown> {
 	if (settings.subtaskDepth !== undefined) persisted.subtaskDepth = settings.subtaskDepth;
 	if (settings.autoSelectSingleGoal !== undefined) persisted.autoSelectSingleGoal = settings.autoSelectSingleGoal;
 	if (settings.auditorProjectResources !== undefined) persisted.auditorProjectResources = settings.auditorProjectResources;
+	if (settings.auditorPersistSession !== undefined) persisted.auditorPersistSession = settings.auditorPersistSession;
 	if (settings.hideUnfocusedBanner !== undefined) persisted.hideUnfocusedBanner = settings.hideUnfocusedBanner;
 	if (settings.showAutonomousRuns !== undefined) persisted.showAutonomousRuns = settings.showAutonomousRuns;
 	if (settings.goalsRoot !== undefined) persisted.goalsRoot = settings.goalsRoot;
@@ -1293,6 +1304,7 @@ export function effectiveSettingsReport(cwd: string, env: NodeJS.ProcessEnv = pr
 		{ key: "model", label: "model", format: () => snapshot.value.model ?? "(default)" },
 		{ key: "thinkingLevel", label: "thinking_level", format: () => snapshot.value.thinkingLevel ?? "(default)" },
 		{ key: "auditorProjectResources", label: "auditor project resources", format: () => String(snapshot.value.auditorProjectResources) },
+		{ key: "auditorPersistSession", label: "auditor session on disk", format: () => String(snapshot.value.auditorPersistSession) },
 		{ key: "hideUnfocusedBanner", label: "hide unfocused banner", format: () => String(snapshot.value.hideUnfocusedBanner) },
 		{ key: "showAutonomousRuns", label: "show autonomous runs line", format: () => String(snapshot.value.showAutonomousRuns) },
 		{ key: "goalsRoot", label: "goals root (reload to change)", format: () => snapshot.value.goalsRoot ?? ".pi/goals" },

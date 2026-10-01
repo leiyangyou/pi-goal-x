@@ -326,6 +326,22 @@ function modelLabel(model: Model<any> | undefined): string | undefined {
 	return model ? `${model.provider}/${model.id}` : undefined;
 }
 
+/**
+ * The store the auditor's session lives in.
+ *
+ * In memory by default: the audit is an isolated read-only reviewer, and its transcript is not part of
+ * the operator's session history. With `auditorPersistSession` on, the session is written beside the
+ * session that ran the audit (`sessionDir`), so a run that takes tens of minutes can be watched while
+ * it runs and read afterwards with the same tools as any other transcript.
+ */
+export function createAuditorSessionManager(args: {
+	cwd: string;
+	sessionDir?: string;
+	persist: boolean;
+}): ReturnType<typeof SessionManager.inMemory> {
+	return args.persist ? SessionManager.create(args.cwd, args.sessionDir) : SessionManager.inMemory(args.cwd);
+}
+
 export async function runGoalCompletionAuditor(args: {
 	ctx: ExtensionContext;
 	goal: GoalRecord;
@@ -384,7 +400,11 @@ export async function runGoalCompletionAuditor(args: {
 			...(projectResources
 				? { resourceLoaderOptions: { noExtensions: false, noSkills: false, noPromptTemplates: false, noThemes: false, noContextFiles: false } }
 				: { resourceLoader: makeAuditorResourceLoader() }),
-			sessionManager: SessionManager.inMemory(args.ctx.cwd),
+			sessionManager: createAuditorSessionManager({
+				cwd: args.ctx.cwd,
+				sessionDir: args.ctx.sessionManager?.getSessionDir(),
+				persist: args.settings?.auditorPersistSession === true,
+			}),
 			settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
 			tools: ["read", "grep", "find", "ls", "bash"],
 		} as Parameters<typeof createAgentSession>[0]);

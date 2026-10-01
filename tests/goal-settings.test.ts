@@ -13,6 +13,7 @@ import {
 	type GoalRecord,
 } from "../extensions/goal-record.ts";
 import {
+	goalGlobalSettingsPath,
 	goalSettingsPath,
 	parseGoalSettings,
 	parseSettingsLayer,
@@ -21,6 +22,7 @@ import {
 	saveGoalSettingsFileConfig,
 	effectiveSettingsReport,
 	formatGoalKeybinding,
+	invalidateGoalSettingsCache,
 	type GoalSettings,
 } from "../extensions/goal-settings.ts";
 
@@ -70,6 +72,41 @@ test("parseGoalSettings: autoSelectSingleGoal accepted as bool or string; explic
 	// project can override a global true.
 	assert.deepEqual(parseGoalSettings({ autoSelectSingleGoal: false }), { autoSelectSingleGoal: false });
 	assert.deepEqual(parseGoalSettings({ autoSelectSingleGoal: "false" }), { autoSelectSingleGoal: false });
+});
+
+test("parseGoalSettings: auditorPersistSession accepted as bool or string; explicit false preserved (layering)", () => {
+	assert.deepEqual(parseGoalSettings({ auditorPersistSession: true }), { auditorPersistSession: true });
+	assert.deepEqual(parseGoalSettings({ auditorPersistSession: "true" }), { auditorPersistSession: true });
+	// Layering: explicit false must survive so a project can switch off a global true.
+	assert.deepEqual(parseGoalSettings({ auditorPersistSession: false }), { auditorPersistSession: false });
+	assert.deepEqual(parseGoalSettings({ auditorPersistSession: "false" }), { auditorPersistSession: false });
+});
+
+test("saveGoalSettingsFileConfig persists auditorPersistSession", () => {
+	withTempDir((dir) => {
+		saveGoalSettingsFileConfig(dir, { auditorPersistSession: true });
+		assert.equal(loadGoalSettingsFileConfig(dir).auditorPersistSession, true);
+	});
+});
+
+test("loadGoalSettings: auditorPersistSession defaults to false when no layer sets it", () => {
+	withTempDir((dir) => {
+		// The agent dir is redirected into the temp dir on purpose: without it this reads the
+		// operator's real global file, so the assertion would depend on their setup running.
+		const agentDir = path.join(dir, "agent");
+		const env = { PI_CODING_AGENT_DIR: agentDir };
+		invalidateGoalSettingsCache();
+		assert.equal(loadGoalSettings(dir, env).auditorPersistSession, false);
+
+		assert.equal(goalGlobalSettingsPath(env, dir), path.join(agentDir, "pi-goal-x-settings.json"));
+		writeJson(path.join(agentDir, "pi-goal-x-settings.json"), { auditorPersistSession: true });
+		invalidateGoalSettingsCache();
+		assert.equal(loadGoalSettings(dir, env).auditorPersistSession, true, "the global layer turns it on for every project");
+
+		writeJson(goalSettingsPath(dir), { auditorPersistSession: false });
+		invalidateGoalSettingsCache();
+		assert.equal(loadGoalSettings(dir, env).auditorPersistSession, false, "a project can switch it back off");
+	});
 });
 
 test("parseGoalSettings: unknown keys rejected", () => {
@@ -145,6 +182,11 @@ function withTempDir(fn: (dir: string) => void): void {
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
+}
+
+function writeJson(file: string, value: unknown): void {
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, JSON.stringify(value), "utf8");
 }
 
 test("loadGoalSettingsFileConfig: missing file returns empty defaults", () => {
