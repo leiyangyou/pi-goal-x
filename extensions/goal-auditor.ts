@@ -76,24 +76,30 @@ export interface AuditorVerificationEvidence {
 	contract?: string;
 }
 
-function renderAuditorTaskTree(tasks: GoalTask[], indent: number): string[] {
+function renderAuditorTaskTree(tasks: GoalTask[], indent: number, includeContracts = true): string[] {
 	const prefix = "  ".repeat(indent);
 	const lines: string[] = [];
 	for (const task of tasks) {
 		const marker = task.status === "complete" ? "[x]" : task.status === "skipped" ? "[~]" : "[ ]";
 		lines.push(`${prefix}${marker} ${task.id}: ${escapePromptPayload(task.title)}`);
+		// Estate patch `pi-goal-x-auditor-address`: a task's own contract is the sentence naming what
+		// had to survive the task (e.g. "the review report is retained"). Titles alone told the auditor
+		// a review task existed but never that an artefact was supposed to be retained by it.
+		if (includeContracts && task.verificationContract?.trim()) {
+			lines.push(`${prefix}  contract: ${escapePromptPayload(task.verificationContract.trim())}`);
+		}
 		if (task.subtasks && task.subtasks.length > 0) {
-			lines.push(...renderAuditorTaskTree(task.subtasks, indent + 1));
+			lines.push(...renderAuditorTaskTree(task.subtasks, indent + 1, includeContracts));
 		}
 	}
 	return lines;
 }
 
-function taskSummaryBlock(taskList?: GoalTaskList | null): string {
+function taskSummaryBlock(taskList?: GoalTaskList | null, includeContracts = true): string {
 	if (!taskList || taskList.tasks.length === 0) return "";
 	const { total, complete, skipped, pending } = countTaskSubtree(taskList.tasks);
 	const lines: string[] = [`Tasks: ${complete}/${total} complete${skipped > 0 ? `, ${skipped} skipped` : ""}`];
-	lines.push(...renderAuditorTaskTree(taskList.tasks, 0));
+	lines.push(...renderAuditorTaskTree(taskList.tasks, 0, includeContracts));
 	const gate = taskList.blockCompletion && pending > 0 ? " | TASK GATE: pending tasks block completion" : "";
 	lines[0] = lines[0]! + gate;
 	return lines.join("\n");
@@ -172,6 +178,11 @@ export function buildGoalAuditorPrompt(args: {
 	/** P1-6: parent-rendered evidence (ledger tail + turn trail) so the audit
 	 * starts warm instead of re-deriving what the parent session already holds. */
 	warmContext?: string | null;
+	/** Estate patch `pi-goal-x-auditor-address`: the executor session's own directory, a pi core
+	 * accessor (`ctx.sessionManager.getSessionDir()`), deliberately not any peer extension's file
+	 * layout. An isolated auditor handed a directory it can list has no reason to search the
+	 * filesystem - the failure this exists to prevent. */
+	sessionDir?: string | null;
 }): string {
 	return [
 		"You are the independent completion auditor for pi-goal. Decide whether the user's objective is actually satisfied.",
@@ -183,6 +194,15 @@ export function buildGoalAuditorPrompt(args: {
 		"4. Explain missing or weak evidence concisely. Disapprove alpha scaffold, generated template, shallow draft or proxy milestones lacking the user-facing value requested.",
 		"5. End with exactly <approved/> only if the objective is truly complete; otherwise end with exactly <disapproved/>.",
 		"",
+		...(args.sessionDir?.trim()
+			? [
+					"Environment: the executor session's own directory. Session-scoped files that an extension retained for this session (review reports, transcripts) live there - list it instead of searching the filesystem:",
+					"<session_dir>",
+					args.sessionDir.trim(),
+					"</session_dir>",
+					"",
+				]
+			: []),
 		"Goal objective:",
 		"<objective>",
 		escapePromptPayload(args.goal.objective),
@@ -205,7 +225,7 @@ export function buildGoalAuditorPrompt(args: {
 			"<task_state>",
 			// Task titles are already escaped inside renderAuditorTaskTree; an
 			// extra pass would double-escape (&amp;lt;).
-			taskSummaryBlock(args.goal.taskList),
+			taskSummaryBlock(args.goal.taskList, !args.settings?.disableContracts),
 			"</task_state>",
 		] : []),
 		...(!args.settings?.disableContracts && args.goal.verificationContract?.trim() ? [
@@ -321,6 +341,13 @@ export async function runGoalCompletionAuditor(args: {
 	createSession?: typeof createAgentSession;
 }): Promise<GoalAuditorResult> {
 	const config = loadGoalSettings(args.ctx.cwd);
+	// Estate patch `pi-goal-x-auditor-address`. The auditor runs in an isolated in-memory session
+	// with an empty resource loader, so it cannot see anything the executor retained outside the
+	// repo unless it is told where to look. Measured 2026-10-01: with no address, a completion audit
+	// spent 25+ minutes inside `find /` over a 1.2 TB home while the executor sat frozen on
+	// update_goal({status:'complete'}). The directory is pi core's own session directory, not a peer
+	// extension's layout, so nothing here learns another extension's conventions.
+	const sessionDir = (args.ctx.sessionManager as { getSessionDir?: () => string | undefined } | undefined)?.getSessionDir?.();
 	const resolved = resolveAuditorModel(args.ctx, config);
 	const model = resolved.model;
 	const thinkingLevel = config.thinkingLevel;
@@ -448,7 +475,14 @@ export async function runGoalCompletionAuditor(args: {
 		emitProgress();
 		try {
 			if (args.signal?.aborted) return { approved: false, disapproved: true, output: "", model: modelLabel(model), thinkingLevel, error: "Auditor aborted." };
-			await session.prompt(buildGoalAuditorPrompt(args));
+			await session.prompt(buildGoalAuditorPrompt({
+				goal: args.goal,
+				detailedSummary: args.detailedSummary,
+				completionSummary: args.completionSummary,
+				settings: args.settings,
+				warmContext: args.warmContext,
+				sessionDir,
+			}));
 		} finally {
 			args.signal?.removeEventListener("abort", abortSession);
 			progress.phase = "done";

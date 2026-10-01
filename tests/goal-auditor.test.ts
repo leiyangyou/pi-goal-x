@@ -463,3 +463,115 @@ test("resolveAuditorModel resolves explicit provider/model and falls back to the
 	} as never, {} as never);
 	assert.equal(unset.model, session);
 });
+
+// ---------------------------------------------------------------------------
+// Estate patch `pi-goal-x-auditor-address` (2026-10-01).
+//
+// Symptom it fixes: an isolated auditor was handed no address for anything the executor had
+// retained outside the repo, so on a completion audit it searched the filesystem instead. Measured
+// on a live goal: one `find / -name "*reviewer_output*"` followed by `find /Users/leiyang -type d
+// -name subagent-artifacts` ran 25+ minutes inside a 1.2 TB home directory, while the executor's
+// session sat frozen on `update_goal({status:'complete'})` for the whole audit.
+//
+// Two facts the auditor was never given, both harness-owned rather than peer-extension knowledge:
+// the executor session's own directory, and each task's verification contract.
+// ---------------------------------------------------------------------------
+
+test("buildGoalAuditorPrompt hands over the executor session directory", () => {
+	const prompt = buildGoalAuditorPrompt({
+		goal: goal(),
+		detailedSummary: "Goal: test",
+		sessionDir: "/Users/example/.pi/agent/sessions/--tmp-proj--",
+	});
+	assert.ok(prompt.includes("<session_dir>"), "the directory is inside its own labelled block");
+	assert.ok(prompt.includes("/Users/example/.pi/agent/sessions/--tmp-proj--"), "the directory reaches the auditor");
+	assert.ok(prompt.includes("</session_dir>"), "the block is closed");
+	// The address is a harness fact: pi core's own session directory. An isolated auditor that is
+	// handed a path it can list never has to search for one, so no peer extension's file layout may
+	// leak into the prompt as a substitute for an address.
+	assert.ok(!prompt.includes("subagent-artifacts"), "no extension-specific layout leaks into the prompt");
+	assert.ok(!prompt.includes("reviewer_output"), "no extension-specific filename leaks into the prompt");
+});
+
+test("buildGoalAuditorPrompt omits the session directory block when the harness has none", () => {
+	const bare = buildGoalAuditorPrompt({ goal: goal(), detailedSummary: "Goal: test" });
+	assert.ok(!bare.includes("<session_dir>"), "no empty block, and no dangling label");
+	assert.ok(!bare.includes("Executor session directory"), "the label goes with the value");
+
+	const blank = buildGoalAuditorPrompt({ goal: goal(), detailedSummary: "Goal: test", sessionDir: "   " });
+	assert.ok(!blank.includes("<session_dir>"), "whitespace-only is unknown, not an address");
+});
+
+test("buildGoalAuditorPrompt renders each task's verification contract", () => {
+	const prompt = buildGoalAuditorPrompt({
+		goal: goal({
+			taskList: {
+				blockCompletion: false,
+				proposedAt: "2026-05-12T00:00:00.000Z",
+				tasks: [
+					{
+						id: "review",
+						title: "Independent review pass (separate reviewer) and resolve findings",
+						status: "complete",
+						verificationContract: "A reviewer that is not the author reviews the diff; the review report is retained.",
+					},
+					{ id: "commit", title: "Commit the work", status: "pending" },
+				],
+			},
+		}),
+		detailedSummary: "Goal: test",
+	});
+	// Without this, the auditor is told a review task exists but never that a report was retained -
+	// the sentence naming the artifact it is expected to find.
+	assert.ok(prompt.includes("  contract: A reviewer that is not the author"), "the per-task contract is rendered under its task");
+	assert.ok(prompt.includes("the review report is retained"), "the retention requirement reaches the auditor");
+	assert.equal(prompt.split("  contract: ").length - 1, 1, "one contract line for the one task that has one");
+});
+
+test("buildGoalAuditorPrompt honours disableContracts for the task tree too", () => {
+	const prompt = buildGoalAuditorPrompt({
+		goal: goal({
+			taskList: {
+				blockCompletion: false,
+				proposedAt: "2026-05-12T00:00:00.000Z",
+				tasks: [{ id: "t1", title: "Task with a contract", status: "pending", verificationContract: "retained report" }],
+			},
+		}),
+		detailedSummary: "Goal: test",
+		settings: { disableContracts: true } as never,
+	});
+	assert.ok(!prompt.includes("retained report"), "disableContracts suppresses per-task contracts");
+	assert.ok(!prompt.includes("<verification_contract>"), "the goal-level contract stays suppressed too");
+});
+
+test("runGoalCompletionAuditor hands the executor session directory to the auditor", async () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-goal-auditor-test-"));
+	try {
+		let prompted = "";
+		const mockSession = {
+			abort: () => {},
+			subscribe: () => () => {},
+			prompt: async (text: string) => {
+				prompted = text;
+			},
+		};
+
+		await runGoalCompletionAuditor({
+			ctx: {
+				cwd,
+				model: undefined,
+				modelRegistry: { find: () => undefined, getAvailable: () => [] },
+				sessionManager: { getSessionDir: () => "/tmp/fake-executor-session" },
+			} as never,
+			goal: goal(),
+			detailedSummary: "test",
+			createSession: async () => ({ session: mockSession }) as never,
+		});
+
+		// The plumbing, not just the prompt builder: the directory must be taken from the executor's
+		// own session context and land in the auditor's first prompt.
+		assert.ok(prompted.includes("/tmp/fake-executor-session"), "the auditor's prompt carries the executor session directory");
+	} finally {
+		fs.rmSync(cwd, { recursive: true, force: true });
+	}
+});
