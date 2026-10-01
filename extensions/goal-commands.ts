@@ -79,6 +79,66 @@ import type { GoalCore } from "./goal-state.ts";
  * drafting; -direct commands are the explicit bypass. Every frequent lifecycle action is independently
  * registered so it appears in slash-command tab completion. No aliases.
  */
+/**
+ * One declarative row table for the settings menu (follow-up Stage 1).
+ * Rendering and dispatch both derive from SETTING_ROWS so the displayed
+ * fields and the selectable fields can never drift apart. Rows are grouped
+ * into sections (Goal behavior / Task tracking / Completion auditor).
+ *
+ * Exported so a test can hold the invariant that every boolean key
+ * {@link BOOLEAN_SETTING_KEYS} formats has a row here: a key missing from this table is silent — the
+ * file layer keeps working while the setting cannot be seen or toggled.
+ */
+export type SettingRow = {
+	key: keyof GoalSettings | string;
+	label: string;
+	section: "Goal behavior" | "Task tracking" | "Completion auditor" | "Blocker Oracle";
+	kind: "boolean" | "modelSelector" | "thinking" | "positiveInteger";
+	/** Settings path for the mutation (defaults to [key]). */
+	path?: string[];
+};
+
+/** The boolean settings the menu formatter renders as `true`/`false`. */
+export const BOOLEAN_SETTING_KEYS: ReadonlySet<string> = new Set([
+	"strictExecutionContract",
+	"disabled",
+	"disableTasks",
+	"disableContracts",
+	"autoSelectSingleGoal",
+	"auditorProjectResources",
+	"auditorPersistSession",
+	"hideUnfocusedBanner",
+	"hideUnfocusedPrompt",
+	// Upstream 0.32.0 added this boolean; the chain it used to sit in is replaced by this set here.
+	"showAutonomousRuns",
+]);
+
+export const SETTING_ROWS: readonly SettingRow[] = [
+	{ key: "autoSelectSingleGoal", label: "autoSelectSingleGoal", section: "Goal behavior", kind: "boolean" },
+	{ key: "hideUnfocusedBanner", label: "hideUnfocusedBanner", section: "Goal behavior", kind: "boolean" },
+	{ key: "hideUnfocusedPrompt", label: "hideUnfocusedPrompt", section: "Goal behavior", kind: "boolean" },
+	{ key: "disableContracts", label: "disableContracts", section: "Goal behavior", kind: "boolean" },
+	{ key: "strictExecutionContract", label: "explicit execution contracts (opt-in)", section: "Goal behavior", kind: "boolean" },
+	{ key: "maxAutonomousRuns", label: "autonomous run allowance", section: "Goal behavior", kind: "positiveInteger" },
+	{ key: "stallTimeoutMinutes", label: "stall timeout (minutes)", section: "Goal behavior", kind: "positiveInteger" },
+	{ key: "objectiveMaxChars", label: "max objective length (0 = none)", section: "Goal behavior", kind: "positiveInteger" },
+	{ key: "disableTasks", label: "disableTasks", section: "Task tracking", kind: "boolean" },
+	{ key: "subtaskDepth", label: "subtaskDepth", section: "Task tracking", kind: "positiveInteger" },
+	{ key: "disabled", label: "auditor disabled", section: "Completion auditor", kind: "boolean" },
+	{ key: "auditorPersistSession", label: "auditor session on disk", section: "Completion auditor", kind: "boolean" },
+	{ key: "auditorProjectResources", label: "auditor project resources", section: "Completion auditor", kind: "boolean" },
+	{ key: "provider", label: "provider", section: "Completion auditor", kind: "modelSelector" },
+	{ key: "model", label: "model", section: "Completion auditor", kind: "modelSelector" },
+	{ key: "thinkingLevel", label: "thinking_level", section: "Completion auditor", kind: "thinking" },
+	// Issue #26: opt-in blocker Oracle. Disabled by default; provider/model
+	// must BOTH be set explicitly — the executor model is never used silently.
+	{ key: "oracleEnabled", label: "oracle enabled", section: "Blocker Oracle", kind: "boolean", path: ["oracle", "enabled"] },
+	{ key: "oracleProviderModel", label: "oracle provider/model", section: "Blocker Oracle", kind: "modelSelector", path: ["oracle"] },
+	{ key: "oracleThinkingLevel", label: "oracle thinking_level", section: "Blocker Oracle", kind: "thinking", path: ["oracle", "thinkingLevel"] },
+	{ key: "oracleProjectResources", label: "oracle project resources", section: "Blocker Oracle", kind: "boolean", path: ["oracle", "projectResources"] },
+	{ key: "oracleMaxFailedAttemptsPerBlocker", label: "max failed attempts per blocker", section: "Blocker Oracle", kind: "positiveInteger", path: ["oracle", "maxFailedAttemptsPerBlocker"] },
+];
+
 export function registerGoalCommands(core: GoalCore): void {
 	const { pi } = core;
 
@@ -393,8 +453,10 @@ export function registerGoalCommands(core: GoalCore): void {
 	];
 
 	function settingsValue(config: GoalSettings, key: keyof GoalSettings | string): string {
-		if (key === "strictExecutionContract" || key === "disabled" || key === "disableTasks" || key === "disableContracts" || key === "autoSelectSingleGoal" || key === "auditorProjectResources" || key === "auditorPersistSession" || key === "hideUnfocusedBanner" || key === "hideUnfocusedPrompt" || key === "showAutonomousRuns") {
-			return config[key] === true ? "true" : "false";
+		// A membership test does not narrow `key` the way the old `key === "…" || …` chain did, so the
+		// lookup is spelled out: these keys are booleans in GoalSettings, and an unset one reads false.
+		if (BOOLEAN_SETTING_KEYS.has(key)) {
+			return (config as Record<string, unknown>)[key] === true ? "true" : "false";
 		}
 		if (key === "subtaskDepth") return config.subtaskDepth !== undefined ? String(config.subtaskDepth) : "1";
 		if (key === "maxAutonomousRuns") return config.maxAutonomousRuns === 0 ? "0 (disabled)" : String(config.maxAutonomousRuns ?? "unlimited (default)");
