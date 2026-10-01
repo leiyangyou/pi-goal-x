@@ -196,9 +196,12 @@ export function buildGoalAuditorPrompt(args: {
 		"",
 		...(args.sessionDir?.trim()
 			? [
-					"Environment: the executor session's own directory. Session-scoped files that an extension retained for this session (review reports, transcripts) live there - list it instead of searching the filesystem:",
+					"Environment: the executor session's own directory. Session-scoped files that an extension retained for this session (review reports, transcripts) may live there - list it instead of searching the filesystem, and if what you need is not there, say so rather than sweeping the disk:",
 					"<session_dir>",
-					args.sessionDir.trim(),
+					// Interpolated into a prompt, so it gets the same delimiter treatment as every other
+					// payload (#21). Inserted verbatim rather than trimmed: a trailing space is legal in a
+					// directory name, and trimming would hand the auditor a path that does not exist.
+					escapePromptPayload(args.sessionDir),
 					"</session_dir>",
 					"",
 				]
