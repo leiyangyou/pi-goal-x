@@ -392,7 +392,7 @@ export function registerGoalCommands(core: GoalCore): void {
 	];
 
 	function settingsValue(config: GoalSettings, key: keyof GoalSettings | string): string {
-		if (key === "strictExecutionContract" || key === "disabled" || key === "disableTasks" || key === "disableContracts" || key === "autoSelectSingleGoal" || key === "auditorProjectResources" || key === "hideUnfocusedBanner" || key === "hideUnfocusedPrompt") {
+		if (key === "strictExecutionContract" || key === "disabled" || key === "disableTasks" || key === "disableContracts" || key === "autoSelectSingleGoal" || key === "auditorProjectResources" || key === "auditorPersistSession" || key === "hideUnfocusedBanner" || key === "hideUnfocusedPrompt") {
 			return config[key] === true ? "true" : "false";
 		}
 		if (key === "subtaskDepth") return config.subtaskDepth !== undefined ? String(config.subtaskDepth) : "1";

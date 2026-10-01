@@ -10,8 +10,22 @@ export function createExtensionRuntime(): Record<string, never> {
 	return {};
 }
 
+/**
+ * The two stores the auditor chooses between. They expose the same accessors Pi's real
+ * SessionManager does, because the assertions are about that interface (`getSessionFile()` absent =
+ * in memory). The real test run resolves the real package; the bundled suite resolves this stub.
+ */
 export const SessionManager = {
-	inMemory: (cwd: string) => ({ cwd }),
+	inMemory: (cwd: string) => ({
+		cwd,
+		getSessionDir: () => undefined,
+		getSessionFile: () => undefined,
+	}),
+	create: (cwd: string, sessionDir?: string) => ({
+		cwd,
+		getSessionDir: () => sessionDir,
+		getSessionFile: () => (sessionDir ? `${sessionDir}/stub.jsonl` : "stub.jsonl"),
+	}),
 };
 
 export const SettingsManager = {
